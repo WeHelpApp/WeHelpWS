@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use App\Models\Evento;
 use App\Models\Usuario;
@@ -65,10 +66,28 @@ class EventoController extends Controller
         }
     }
 
-    public function index()
+    public function index(Request $request)
     {
         try {
-            $e = Evento::with(['usuario', 'categoria', 'requisitos']);
+            $condicao = [];
+            $input = $request->all();
+
+            if (isset($input['participante_id']))
+                $e = Evento::with(['usuario', 'categoria', 'requisitos'])
+                    ->whereHas('participantes', function($q)
+                    {
+                        $q->where('usuario_id', '=', 11);
+                    });
+            else
+                $e = Evento::with(['usuario', 'categoria', 'requisitos']);
+            if (isset($input['cidade']))
+                $condicao['cidade'] = $input['cidade'];
+            if (isset($input['rua']))
+                $condicao['rua'] = $input['rua'];
+            if (isset($input['usuario_id']))
+                $condicao['usuario_id'] = $input['usuario_id'];
+            $e->where($condicao);
+
             return $this->respond('done', $e->get());
         } catch (Exception $ex) {
             return $this->respond('erro', $ex->getMessage());
@@ -122,9 +141,53 @@ class EventoController extends Controller
 
             $evento->participantes()->save($usuario);
 
-            return $this->respond('done');
+            return $this->respond('done', ['message' => 'ok']);
 
 
+        } catch (QueryException $ex) {
+            $msg = $ex->getMessage();
+            if (strpos($msg, 'Duplicate entry') !== false)
+                $msg = "Usuário já está participando deste evento";
+            return $this->respond('error', ['message' => $msg]);
+        } catch (Exception $ex) {
+            return $this->respond('error', ['message' => $ex->getMessage()]);
+        }
+    }
+
+    public function RemoverParticipante(Request $request) {
+        try {
+            $input = $request->all();
+
+            $rules = [
+                'usuario_id' => 'required',
+                'evento_id' => 'required'
+            ];
+            $messages = [
+                'usuario_id.required'    => 'Informe o Id do usuário',
+                'evento_id.required'    => 'Informe o Id do evento',
+            ];
+
+            $validar = Validator::make($input, $rules, $messages);
+            // Se falhar, retorna mensagens de erro
+            if ($validar->fails())
+                return response()->json($validar->errors(), $this->statusCodes['error']);
+
+            $evento = Evento::find($input['evento_id']);
+            if (!$evento)
+                return response()->json("Evento não encontrado", $this->statusCodes['error']);
+
+            $usuario = Usuario::find($input['usuario_id']);
+            if (!$usuario)
+                return response()->json("Usuário não encontrado", $this->statusCodes['error']);
+
+            $evento->participantes()->detach($usuario->id);
+
+            return $this->respond('done', ['message' => 'ok']);
+
+
+        } catch (QueryException $ex) {
+            $msg = $ex;
+            return $this->respond('error', ['message' => $msg]);
         } catch (Exception $ex) {
             return $this->respond('error', ['message' => $ex->getMessage()]);
         }
